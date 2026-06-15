@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import os
 
-from flask import Flask, jsonify, request, send_from_directory
+from flask import Flask, jsonify, redirect, request, send_from_directory
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
 
@@ -33,21 +33,31 @@ handler = ModelHandler()
 FRONTEND_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "frontend")
 
 
-# ---------------------------------------------------------------- health
+# ---------------------------------------------------------------- root
 @app.get("/")
 def index():
+    # Redirect visitors to the web UI.
+    return redirect("/ui", code=302)
+
+
+# ---------------------------------------------------------------- health (JSON)
+@app.get("/api")
+@app.get("/api/")
+def api_root():
     return jsonify(
         {
             "service": "NanoCNC Predictor",
             "status": "ok",
             "demo_mode": handler.demo_mode,
+            "ui": "/ui",
         }
     )
 
 
 # ---------------------------------------------------------------- frontend
-@app.get("/app")
-@app.get("/app/<path:filename>")
+@app.get("/ui")
+@app.get("/ui/")
+@app.get("/ui/<path:filename>")
 def frontend(filename: str | None = None):
     """Serve the static frontend (index.html, style.css, app.js)."""
     if filename is None or filename == "":
