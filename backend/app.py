@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import os
 
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, send_from_directory
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
 
@@ -24,10 +24,13 @@ from model_handler import (
 )
 
 
-app = Flask(__name__)
+app = Flask(__name__, static_folder=None)
 CORS(app)  # CORS enabled on all routes
 
 handler = ModelHandler()
+
+# Path to the bundled frontend (../frontend relative to this file)
+FRONTEND_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "frontend")
 
 
 # ---------------------------------------------------------------- health
@@ -40,6 +43,16 @@ def index():
             "demo_mode": handler.demo_mode,
         }
     )
+
+
+# ---------------------------------------------------------------- frontend
+@app.get("/app")
+@app.get("/app/<path:filename>")
+def frontend(filename: str | None = None):
+    """Serve the static frontend (index.html, style.css, app.js)."""
+    if filename is None or filename == "":
+        return send_from_directory(FRONTEND_DIR, "index.html")
+    return send_from_directory(FRONTEND_DIR, filename)
 
 
 # -------------------------------------------------------------- /model-info
@@ -119,5 +132,10 @@ def upload_model():
 
 
 if __name__ == "__main__":
-    # Bind to localhost on the standard port for the frontend.
+    # Local development: bind to localhost on the standard port.
     app.run(host="127.0.0.1", port=5000, debug=False)
+
+
+# WSGI entrypoint for production servers (gunicorn / Render)
+#   gunicorn app:app
+application = app

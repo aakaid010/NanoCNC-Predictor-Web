@@ -2,7 +2,11 @@
    NanoCNC Predictor — frontend logic
    ============================================================ */
 
-const API_BASE = "http://localhost:5000";
+// Use the same origin so the app works on localhost, Render, or any host.
+// Override with window.NANOCNC_API_BASE if you need a separate API host.
+const API_BASE =
+  (typeof window !== "undefined" && window.NANOCNC_API_BASE) ||
+  window.location.origin;
 
 const SLIDER_INPUTS = [
   { slider: "acidConc",   input: "acidConcInput",   min: 8,   max: 75   },
