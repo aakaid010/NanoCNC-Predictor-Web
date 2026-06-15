@@ -190,6 +190,4 @@ Research / thesis use. Please cite appropriately if used in academic work.
 
 ---
 
-## 👤 Author
 
-Thesis project — NanoCNC Predictor
