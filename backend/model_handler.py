@@ -12,6 +12,23 @@ from typing import Any, Dict, List, Optional
 
 import joblib
 import numpy as np
+try:
+    import numpy.random._mt19937 as _mt
+    # Older numpy exposed MT19937 at numpy.random._mt19937.MT19937.
+    # Newer numpy (>=1.25) moved it to numpy.random.mt19937.MT19937 (private),
+    # so unpickling bundles saved with old numpy fails with:
+    # ValueError: <class numpy.random._mt19937.MT19937> is not a known BitGenerator module.
+    # Register an alias so joblib.load can find it.
+    if not hasattr(_mt, "MT19937"):
+        try:
+            from numpy.random.mt19937 import MT19937 as _NewMT
+            _mt.MT19937 = _NewMT
+        except Exception:
+            pass
+except Exception:
+    pass
+
+
 import pandas as pd
 
 
@@ -223,3 +240,4 @@ class ModelHandler:
                 "Place nanocnc_model_bundle.pkl in backend/models/ for real ML predictions."
             ),
         }
+
