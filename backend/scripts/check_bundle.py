@@ -38,10 +38,50 @@ from model_handler import ModelHandler, candidate_paths
 BUNDLE = os.path.join(BACKEND, "models", "nanocnc_model_bundle.pkl")
 
 
-def _which_exists() -> str | None:
+def _find_bundle() -> str | None:
+    """Find the bundle file regardless of Render's build cwd.
+
+    Strategy (first hit wins):
+      1. The list of `candidate_paths()` from `model_handler` (preferred —
+         that is what the running service uses).
+      2. Absolute path computed from __file__: ``<HERE>/../models/<name>``.
+      3. Recursive glob from every plausible repo root for the pkl file.
+
+    Returns the first path that exists, or None.
+    """
+    name = "nanocnc_model_bundle.pkl"
+
+    # 1. Trust whatever paths model_handler already enumerates.
     for cand in candidate_paths():
-        if os.path.isfile(cand):
-            return cand
+        try:
+            if os.path.isfile(cand):
+                return cand
+        except Exception:
+            continue
+
+    # 2. Walk up from the script until we find a folder that contains
+    #    ``models/<name>``. This works for Render builds regardless of cwd.
+    cur = os.path.abspath(HERE)
+    for _ in range(6):  # up to 6 levels: scripts -> backend -> repo root
+        guess = os.path.join(cur, "models", name)
+        if os.path.isfile(guess):
+            return guess
+        parent = os.path.dirname(cur)
+        if parent == cur:
+            break
+        cur = parent
+
+    # 3. Recursive glob from cwd and from BACKEND. Expensive but definitive.
+    import glob
+    roots = [os.getcwd(), BACKEND, "/opt/render/project/src"]
+    seen = set()
+    for root in roots:
+        if not root or root in seen or not os.path.isdir(root):
+            continue
+        seen.add(root)
+        for hit in glob.glob(os.path.join(root, "**", name), recursive=True):
+            if os.path.isfile(hit):
+                return hit
     return None
 
 
@@ -52,10 +92,20 @@ def main() -> int:
         f"joblib={joblib.__version__}",
         flush=True,
     )
+    print(
+        f"check_bundle: cwd={os.getcwd()}  __file__={__file__}  "
+        f"HERE={HERE}  BACKEND={BACKEND}",
+        flush=True,
+    )
 
-    found = _which_exists()
+    found = _find_bundle()
     if found is None:
-        print(f"!! No bundle file found. Looked at: {candidate_paths()}", flush=True)
+        print(
+            "!! No bundle file found. Tried candidate_paths() and recursive "
+            f"glob from cwd={os.getcwd()}, BACKEND={BACKEND}. "
+            f"candidate_paths()={candidate_paths()}",
+            flush=True,
+        )
         return 1
     print(f"Found bundle: {found}  size={os.path.getsize(found)} bytes", flush=True)
 
