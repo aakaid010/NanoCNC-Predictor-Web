@@ -4,8 +4,12 @@ services:
     runtime: python
     plan: free
     rootDirectory: backend
-    buildCommand: "pip install -r requirements.txt"
+    buildCommand: "pip install --upgrade pip && pip install -r requirements.txt && python scripts/check_bundle.py"
     startCommand: "gunicorn app:app --bind 0.0.0.0:$PORT --workers 1 --timeout 120"
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.9
+      - key: PYTHONDONTWRITEBYTECODE
+        value: "1"
+      - key: PYTHONUNBUFFERED
+        value: "1"

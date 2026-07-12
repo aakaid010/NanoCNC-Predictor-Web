@@ -1,4 +1,4 @@
-﻿"""Model handler for NanoCNC Predictor.
+"""Model handler for NanoCNC Predictor.
 
 Loads a joblib bundle from backend/models/nanocnc_model_bundle.pkl when present.
 Falls back to a simple linear-approximation demo mode so the UI still works
@@ -8,24 +8,102 @@ without a trained model.
 from __future__ import annotations
 
 import os
+import sys
 from typing import Any, Dict, List, Optional
 
 import joblib
 import numpy as np
-try:
-    import numpy.random._mt19937 as _mt
-    # Older numpy exposed MT19937 at numpy.random._mt19937.MT19937.
-    # Newer numpy (>=1.25) moved it to numpy.random.mt19937.MT19937 (private),
-    # so unpickling bundles saved with old numpy fails with:
-    # ValueError: <class numpy.random._mt19937.MT19937> is not a known BitGenerator module.
-    # Register an alias so joblib.load can find it.
-    if not hasattr(_mt, "MT19937"):
+def _register_mt19937_aliases() -> None:
+    """Make joblib.load() resolve MT19937 on every numpy layout we ship to.
+
+    Why this exists
+    ---------------
+    scikit-learn Pipelines (RandomForest, GradientBoosting, ExtraTrees, ...)
+    pickle the BitGenerator instance they were trained with. The MT19937
+    Mersenne Twister has moved around inside numpy:
+
+      * numpy <= 1.24 ............. ``numpy.random._mt19937.MT19937``
+      * numpy 1.25 / 1.26 ......... ``numpy.random.mt19937.MT19937``
+      * numpy >= 2.0  ............. ``numpy.random._mt19937.MT19937``
+                                    (the underscore-prefixed module
+                                    reappeared as a shim)
+
+    When the bundle and the runtime disagree, joblib raises::
+
+        ValueError: numpy.random._mt19937.MT19937 is not a known
+                    BitGenerator module
+
+    and ``ModelHandler`` falls back to demo mode silently. This function
+    makes the unpickler happy regardless of which numpy is installed.
+
+    The strategy is to locate MT19937 under whatever name is currently
+    exposed, then register it under every legacy and modern module path
+    *and* in numpy's internal ``BitGenerators`` registry, so any of the
+    three layouts above can resolve the reference.
+    """
+    import importlib
+    import types
+
+    mt_cls = None
+    for dotted in (
+        "numpy.random.mt19937.MT19937",       # 1.25 / 1.26
+        "numpy.random._mt19937.MT19937",      # <=1.24 and >=2.0
+    ):
         try:
-            from numpy.random.mt19937 import MT19937 as _NewMT
-            _mt.MT19937 = _NewMT
+            module_name, _, attr = dotted.rpartition(".")
+            mod = importlib.import_module(module_name)
+            mt_cls = getattr(mod, attr, None)
+            if mt_cls is not None:
+                break
         except Exception:
-            pass
+            continue
+    if mt_cls is None:
+        # Nothing we can do; let joblib raise its own error.
+        return
+
+    # Build the alias modules so `import numpy.random._mt19937` works
+    # even on numpy 1.25 / 1.26 where the file does not exist.
+    try:
+        _legacy = importlib.import_module("numpy.random._mt19937")
+    except Exception:
+        _legacy = types.ModuleType("numpy.random._mt19937")
+        _legacy.MT19937 = mt_cls  # type: ignore[attr-defined]
+        sys.modules.setdefault("numpy.random._mt19937", _legacy)
+    else:
+        if not hasattr(_legacy, "MT19937"):
+            _legacy.MT19937 = mt_cls  # type: ignore[attr-defined]
+
+    # New-path module on legacy numpy where it doesn't exist yet.
+    try:
+        _new = importlib.import_module("numpy.random.mt19937")
+    except Exception:
+        _new = types.ModuleType("numpy.random.mt19937")
+        _new.MT19937 = mt_cls  # type: ignore[attr-defined]
+        sys.modules.setdefault("numpy.random.mt19937", _new)
+    else:
+        if not hasattr(_new, "MT19937"):
+            _new.MT19937 = mt_cls  # type: ignore[attr-defined]
+
+    # Register in numpy's private BitGenerators registry that the
+    # unpickler consults. Module name matters: it must match the
+    # reference stored in the pickle.
+    try:
+        import numpy.random._pickle as _np_pickle
+        for key_mod in (
+            "numpy.random._mt19937",
+            "numpy.random.mt19937",
+        ):
+            _np_pickle.BitGenerators[key_mod] = mt_cls
+        # Some numpy versions also keep a flat "MT19937" entry.
+        _np_pickle.BitGenerators["MT19937"] = mt_cls
+    except Exception:
+        pass
+
+
+try:
+    _register_mt19937_aliases()
 except Exception:
+    # Never let the shim itself break module import.
     pass
 
 

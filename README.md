@@ -85,6 +85,41 @@ The expected bundle structure:
 
 > Without a `.pkl`, the app uses **Demo Mode** (linear approximation) so the UI is still testable.
 
+### Bundle + numpy version gotcha (Render)
+
+The trained model bundle pickles scikit-learn `Pipeline`s that internally
+hold `numpy.random.MT19937` bit-generator state. The location of that
+class moved between numpy releases:
+
+| numpy version | pickled reference                |
+|---------------|----------------------------------|
+| ≤ 1.24        | `numpy.random._mt19937.MT19937`  |
+| 1.25 – 1.26   | `numpy.random.mt19937.MT19937`   |
+| ≥ 2.0         | `numpy.random._mt19937.MT19937`  |
+
+Render pins `numpy==1.26.4`, so a bundle saved on numpy ≤ 1.24 will fail
+to unpickle with `ValueError: numpy.random._mt19937.MT19937 is not a
+known BitGenerator module` and the app will silently fall back to
+**Demo Mode**.
+
+Two fixes are shipped:
+
+1. `backend/scripts/reexport_bundle.py` — re-saves the bundle against a
+   modern numpy so the pickle references the layout numpy 1.26 has.
+   Run it locally before pushing:
+
+   ```bash
+   cd backend
+   python scripts/reexport_bundle.py
+   ```
+
+2. `backend/model_handler.py` — registers MT19937 under every layout
+   so even an older pickle loads on Render.
+
+The Render build runs `python scripts/check_bundle.py` as part of
+`buildCommand`, so a broken bundle **fails the deploy** with a clear log
+instead of serving demo mode silently.
+
 ### 3. Run the Flask backend
 
 ```powershell

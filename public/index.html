@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CNCPredict</title>
+  <link rel="stylesheet" href="style.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+</head>
+<body>
+  <main class="container">
+    <!-- ============================== HEADER ============================== -->
+    <header class="header">
+      <h1>CNCPredict</h1>
+      <p class="subtitle">Predict Nanocellulose Properties from Acid Hydrolysis Parameters</p>
+      <span class="badge" id="modelBadge">ML-Powered · Thesis Research Tool</span>
+    </header>
+
+    <!-- ============================== INPUTS ============================== -->
+    <section class="card">
+      <h2 class="card-title">Process Parameters</h2>
+
+      <div class="form-group">
+        <label for="celluloseGroup">Cellulose Source Group</label>
+        <select id="celluloseGroup">
+          <option>Wood / Pulp-based</option>
+          <option selected>Natural Plant Fiber</option>
+          <option>Agricultural Waste</option>
+          <option>Processed Cellulose</option>
+          <option>Algae / Marine</option>
+          <option>Other</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <div class="label-row">
+          <label for="acidConc">H<sub>2</sub>SO<sub>4</sub> Concentration (wt%)</label>
+          <input type="number" id="acidConcInput" min="8" max="75" step="0.5" value="64" />
+        </div>
+        <input type="range" id="acidConc" min="8" max="75" step="0.5" value="64" />
+        <div class="range-hint"><span>8%</span><span>75%</span></div>
+      </div>
+
+      <div class="form-group">
+        <div class="label-row">
+          <label for="tempC">Hydrolysis Temperature (°C)</label>
+          <input type="number" id="tempCInput" min="25" max="100" step="1" value="45" />
+        </div>
+        <input type="range" id="tempC" min="25" max="100" step="1" value="45" />
+        <div class="range-hint"><span>25°C</span><span>100°C</span></div>
+      </div>
+
+      <div class="form-group">
+        <div class="label-row">
+          <label for="timeMin">Hydrolysis Time (min)</label>
+          <input type="number" id="timeMinInput" min="1" max="900" step="1" value="60" />
+        </div>
+        <input type="range" id="timeMin" min="1" max="900" step="1" value="60" />
+        <div class="range-hint"><span>1 min</span><span>900 min</span></div>
+      </div>
+
+      <button id="predictBtn" class="btn-predict" type="button">
+        <span class="flask-icon" aria-hidden="true">🧪</span>
+        <span class="btn-label">Predict Properties</span>
+        <span class="spinner" aria-hidden="true"></span>
+      </button>
+    </section>
+
+    <!-- ============================ WARNING ============================ -->
+    <div id="warningBanner" class="warning-banner hidden" role="alert">
+      ⚠️ Input is outside training data range. Prediction may be less accurate.
+    </div>
+
+    <!-- ============================ RESULTS ============================ -->
+    <section id="resultsCard" class="card results-card hidden">
+      <h2 class="card-title">Predicted Properties</h2>
+      <div class="result-grid">
+        <div class="result-box length">
+          <div class="result-label">CNC Length</div>
+          <div class="result-value">
+            <span id="lengthValue" class="big-number">0</span>
+            <span class="unit">nm</span>
+          </div>
+          <div id="lengthNote" class="result-note"></div>
+        </div>
+        <div class="result-box crystallinity">
+          <div class="result-label">Crystallinity</div>
+          <div class="result-value">
+            <span id="crystallinityValue" class="big-number">0</span>
+            <span class="unit">%</span>
+          </div>
+          <div id="crystallinityNote" class="result-note"></div>
+        </div>
+      </div>
+      <div class="model-used">Model: <span id="modelUsed">—</span></div>
+
+      <details class="interpretation">
+        <summary>Interpretation guide</summary>
+        <ul>
+          <li><strong>CNC &lt; 200 nm</strong> → ultrashort nanocrystals</li>
+          <li><strong>CNC 200–500 nm</strong> → typical range</li>
+          <li><strong>CNC &gt; 500 nm</strong> → elongated nanocrystals</li>
+          <li><strong>Crystallinity &gt; 75%</strong> → highly crystalline</li>
+          <li><strong>Crystallinity 60–75%</strong> → moderately crystalline</li>
+        </ul>
+      </details>
+    </section>
+
+    <!-- ============================ RANGES ============================ -->
+    <section class="card">
+      <h2 class="card-title">Typical Experimental Ranges</h2>
+      <table class="ranges-table">
+        <thead>
+          <tr><th>Parameter</th><th>Min</th><th>Max</th><th>Typical</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>H<sub>2</sub>SO<sub>4</sub> Conc</td><td>8%</td><td>75%</td><td>55–65%</td></tr>
+          <tr><td>Temperature</td><td>25°C</td><td>100°C</td><td>40–65°C</td></tr>
+          <tr><td>Time</td><td>1 min</td><td>900 min</td><td>30–120 min</td></tr>
+        </tbody>
+      </table>
+      <p class="ranges-note">Values from 341 experimental literature records</p>
+    </section>
+
+    <!-- ============================ UPLOAD ============================ -->
+    <section class="card">
+      <details class="upload-details">
+        <summary class="card-title upload-title">Upload Trained Model (.pkl)</summary>
+        <p class="upload-instruction">
+          Export from Kaggle: <code>joblib.dump(model_bundle, "nanocnc_model_bundle.pkl")</code>
+        </p>
+        <div class="upload-row">
+          <input type="file" id="modelFile" accept=".pkl" />
+          <button id="uploadBtn" type="button" class="btn-secondary">Upload</button>
+        </div>
+        <div id="uploadStatus" class="upload-status"></div>
+      </details>
+    </section>
+
+    <!-- ============================ FOOTER ============================ -->
+    <footer class="footer">
+      <div>NanoCNC Predictor · Acid Hydrolysis ML Tool</div>
+      <div class="footer-sub">Thesis Research Application</div>
+    </footer>
+  </main>
+
+  <!-- Toast container -->
+  <div id="toast" class="toast hidden"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
