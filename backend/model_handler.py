@@ -1,6 +1,6 @@
-"""Model handler for NanoCNC Predictor.
+﻿"""Model handler for NanoCNC Predictor.
 
-Loads a joblib bundle from `backend/models/nanocnc_model_bundle.pkl` when present.
+Loads a joblib bundle from backend/models/nanocnc_model_bundle.pkl when present.
 Falls back to a simple linear-approximation demo mode so the UI still works
 without a trained model.
 """
@@ -16,8 +16,8 @@ import pandas as pd
 
 
 MODELS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models")
-BUNDLE_PATH = os.path.join(MODELS_DIR, "nanocnc_model_bundle.pkl")
-
+BUNDLE_FILENAME = "nanocnc_model_bundle.pkl"
+BUNDLE_PATH = os.path.join(MODELS_DIR, BUNDLE_FILENAME)
 DEFAULT_CELLULOSE_GROUPS: List[str] = [
     "Wood / Pulp-based",
     "Natural Plant Fiber",
@@ -38,43 +38,83 @@ DEMO_GROUP_OFFSETS: Dict[str, float] = {
 }
 
 
+def candidate_paths() -> List[str]:
+    """Return the list of bundle paths we will try, in priority order.
+
+    Render runs gunicorn with rootDirectory=backend and a cwd that depends on
+    how the repo was checked out. We try every plausible location so we can
+    surface a useful error if nothing is found.
+    """
+    here = os.path.dirname(os.path.abspath(__file__))
+    return [
+        BUNDLE_PATH,
+        os.path.join(here, BUNDLE_FILENAME),
+        os.path.join(here, "models", BUNDLE_FILENAME),
+        os.path.join(here, "..", "models", BUNDLE_FILENAME),
+        os.path.join(here, "..", "backend", "models", BUNDLE_FILENAME),
+        os.path.join(os.getcwd(), BUNDLE_FILENAME),
+        os.path.join(os.getcwd(), "models", BUNDLE_FILENAME),
+        os.path.join(os.getcwd(), "backend", "models", BUNDLE_FILENAME),
+    ]
+
+
 class ModelHandler:
     """Loads a model bundle (or runs in demo mode) and produces predictions."""
 
     def __init__(self) -> None:
         self.bundle: Optional[Dict[str, Any]] = None
         self.demo_mode: bool = True
+        self.last_error: Optional[str] = None
+        self.bundle_path: Optional[str] = None
         self._load()
 
-    # ------------------------------------------------------------------ load
     def _load(self) -> None:
-        if not os.path.exists(BUNDLE_PATH):
-            self.demo_mode = True
-            self.bundle = None
+        self.last_error = None
+        self.bundle_path = None
+        tried: List[str] = []
+
+        for path in candidate_paths():
+            norm = os.path.normpath(path)
+            tried.append(norm)
+            if not os.path.isfile(norm):
+                continue
+            try:
+                loaded = joblib.load(norm)
+            except Exception as exc:  # noqa: BLE001 - we want to surface everything
+                msg = "joblib.load failed at " + norm + ": " + repr(exc)
+                self.last_error = msg
+                print("[model_handler] " + msg, flush=True)
+                continue
+
+            if not isinstance(loaded, dict) or "length_model" not in loaded:
+                keys = list(loaded.keys()) if isinstance(loaded, dict) else type(loaded).__name__
+                msg = "Bundle has unexpected structure at " + norm + "; keys=" + str(keys)
+                self.last_error = msg
+                print("[model_handler] " + msg, flush=True)
+                continue
+
+            self.bundle = loaded
+            self.demo_mode = False
+            self.bundle_path = norm
+            print("[model_handler] Loaded bundle from " + norm, flush=True)
             return
 
-        try:
-            loaded = joblib.load(BUNDLE_PATH)
-        except Exception as exc:  # pragma: no cover - defensive
-            print(f"[model_handler] Failed to load bundle: {exc}")
-            self.demo_mode = True
-            self.bundle = None
-            return
-
-        if not isinstance(loaded, dict) or "length_model" not in loaded:
-            print("[model_handler] Bundle has unexpected structure; using demo mode.")
-            self.demo_mode = True
-            self.bundle = None
-            return
-
-        self.bundle = loaded
-        self.demo_mode = False
+        # Nothing worked.
+        self.demo_mode = True
+        self.bundle = None
+        if self.last_error is None:
+            self.last_error = (
+                "No bundle file found. Looked at: "
+                + " | ".join(tried)
+                + " | cwd=" + os.getcwd()
+            )
+        print("[model_handler] Demo mode active. " + self.last_error, flush=True)
 
     def reload(self) -> None:
         """Re-read the bundle from disk (called after /upload-model)."""
         self._load()
 
-    # --------------------------------------------------------------- metadata
+    # --------------------------------------------------- metadata
     def get_info(self) -> Dict[str, Any]:
         if self.demo_mode or self.bundle is None:
             return {
@@ -100,7 +140,7 @@ class ModelHandler:
             "r2_crystallinity": float(self.bundle.get("r2_crystallinity", 0.0)),
         }
 
-    # ----------------------------------------------------------- predictions
+    # ----------------------------------------------- predictions
     def predict(
         self,
         cellulose_group: str,
@@ -138,7 +178,6 @@ class ModelHandler:
         df = pd.DataFrame([row], columns=feature_cols)
         length_pred = float(self.bundle["length_model"].predict(df)[0])
         crystal_pred = float(self.bundle["crystallinity_model"].predict(df)[0])
-
         return {
             "cnc_length_nm": round(length_pred, 2),
             "crystallinity_percent": round(crystal_pred, 2),
@@ -148,7 +187,7 @@ class ModelHandler:
             "confidence_note": "Prediction from trained ML model.",
         }
 
-    # --------------------------------------------------------------- demo
+    # ----------------------------------------------- demo
     def _predict_demo(
         self,
         cellulose_group: str,
@@ -175,7 +214,6 @@ class ModelHandler:
         # Clamp to physically reasonable ranges so the demo isn't silly.
         cnc_length = float(np.clip(cnc_length, 50.0, 1500.0))
         crystallinity = float(np.clip(crystallinity, 30.0, 99.0))
-
         return {
             "cnc_length_nm": round(cnc_length, 2),
             "crystallinity_percent": round(crystallinity, 2),

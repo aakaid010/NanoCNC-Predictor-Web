@@ -10,6 +10,7 @@ GET  /                  - serves frontend/index.html
 GET  /<file>            - serves frontend/<file> (style.css, app.js, ...)
 GET  /api               - health check (JSON)
 GET  /api/model-info    - metadata about the loaded model (or demo mode)
+GET  /api/diag         - diagnostics: bundle path, last load error, sklearn version
 POST /api/predict       - {cellulose_group, acid_conc_wt_percent, temp_c, time_min}
                           -> {cnc_length_nm, crystallinity_percent, ...}
 POST /api/upload-model  - multipart .pkl upload; saves to backend/models/ and reloads
@@ -31,10 +32,13 @@ from flask import (
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
 
+import sklearn
+
 from model_handler import (
     BUNDLE_PATH,
     MODELS_DIR,
     ModelHandler,
+    candidate_paths,
 )
 
 
@@ -92,6 +96,44 @@ def model_info():
     info = handler.get_info()
     info["demo_mode"] = handler.demo_mode
     return jsonify(info)
+
+
+@app.get("/api/diag")
+@app.get("/diag")
+def diag():
+    """Diagnostic endpoint to debug model loading.
+
+    Returns which candidate paths were checked, which one (if any) was
+    used, whether the bundle loaded successfully, the captured error if
+    not, and the installed sklearn version. Safe to expose; no secrets.
+    """
+    paths = []
+    for cand in candidate_paths():
+        norm = os.path.normpath(cand)
+        exists = os.path.isfile(norm)
+        paths.append(
+            {
+                "path": norm,
+                "exists": exists,
+                "size_bytes": os.path.getsize(norm) if exists else None,
+            }
+        )
+    bundle = handler.bundle
+    return jsonify(
+        {
+            "demo_mode": handler.demo_mode,
+            "last_error": handler.last_error,
+            "bundle_path": handler.bundle_path,
+            "bundle_path_constant": BUNDLE_PATH,
+            "bundle_loaded": bundle is not None,
+            "bundle_keys": list(bundle.keys()) if bundle else None,
+            "model_name_length": (bundle.get("model_name_length") if bundle else None),
+            "model_name_crystallinity": (bundle.get("model_name_crystallinity") if bundle else None),
+            "candidate_paths": paths,
+            "cwd": os.getcwd(),
+            "sklearn_version": sklearn.__version__,
+        }
+    )
 
 
 @app.post("/api/predict")
