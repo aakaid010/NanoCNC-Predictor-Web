@@ -1,4 +1,4 @@
-# 🧪 CNCPredict — NanoCNC Predictor
+#  CNCPredict — NanoCNC Predictor
 
 A full-stack web application that predicts the **length** and **crystallinity** of cellulose nanocrystals (CNC) produced by **sulfuric acid hydrolysis**, given the cellulose source and process parameters.
 
@@ -9,7 +9,7 @@ A full-stack web application that predicts the **length** and **crystallinity** 
 
 ---
 
-## ✨ Features
+##  Features
 
 - **Real-time prediction** of CNC length (nm) and crystallinity (%) from 4 inputs:
   - Cellulose source group
@@ -24,7 +24,7 @@ A full-stack web application that predicts the **length** and **crystallinity** 
 
 ---
 
-## 📁 Project Structure
+##  Project Structure
 
 ```
 nanocnc-predictor/
@@ -42,7 +42,7 @@ nanocnc-predictor/
 
 ---
 
-## 🚀 Quick Start
+##  Quick Start
 
 ### 1. Install backend dependencies
 
@@ -155,7 +155,7 @@ Multipart upload of a new `.pkl` bundle. Hot-swaps the loaded model.
 
 ---
 
-## 🧬 Dataset Context
+##  Dataset Context
 
 Training ranges derived from **341 experimental literature records** of sulfuric acid hydrolysis of cellulose sources:
 
@@ -167,7 +167,7 @@ Training ranges derived from **341 experimental literature records** of sulfuric
 
 ---
 
-## 🛠️ Tech Stack
+##  Tech Stack
 
 - **Backend:** Flask, Flask-CORS, scikit-learn, joblib, NumPy
 - **Frontend:** HTML5, CSS3, vanilla JavaScript (no framework, no build step)
@@ -175,7 +175,7 @@ Training ranges derived from **341 experimental literature records** of sulfuric
 
 ---
 
-## 🧪 Development
+##  Development
 
 There is no build step. To iterate:
 
@@ -184,12 +184,10 @@ There is no build step. To iterate:
 
 ---
 
-## 📜 License
+##  License
 
 Research / thesis use. Please cite appropriately if used in academic work.
 
 ---
 
-## 👤 Author
 
-Thesis project — NanoCNC Predictor
