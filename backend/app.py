@@ -1,4 +1,4 @@
-"""Flask REST API for NanoCNC Predictor.
+﻿"""Flask REST API for NanoCNC Predictor.
 
 Frontend is served at the root ("/"), and the JSON API lives under "/api/*"
 so that relative asset paths inside index.html resolve correctly without a
@@ -19,6 +19,7 @@ POST /api/upload-model  - multipart .pkl upload; saves to backend/models/ and re
 from __future__ import annotations
 
 import os
+import numpy
 
 from flask import (
     Flask,
@@ -132,6 +133,7 @@ def diag():
             "candidate_paths": paths,
             "cwd": os.getcwd(),
             "sklearn_version": sklearn.__version__,
+            "numpy_version": numpy.__version__,
         }
     )
 
@@ -208,3 +210,4 @@ if __name__ == "__main__":
 
 # gunicorn entrypoint
 application = app
+
