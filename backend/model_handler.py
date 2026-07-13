@@ -127,6 +127,54 @@ except Exception:
     pass
 
 
+def _register_numpy_core_aliases() -> None:
+    """Alias ``numpy._core.*`` to ``numpy.core.*`` for cross-version pickles.
+
+    The shipped bundle was pickled on numpy 2.x, which stores references to
+    private modules under ``numpy._core`` (e.g. ``numpy._core.numeric``).
+    Render's runtime is numpy 1.26.4, which keeps those modules under
+    ``numpy.core`` and does not have ``numpy._core`` at all. Alias the
+    namespace so any ``import numpy._core.X`` resolves to the 1.x module
+    and joblib.load can find the references.
+    """
+    try:
+        import importlib
+        import pkgutil
+        import numpy.core as _core_1x
+    except Exception:
+        return
+
+    # 1) Alias the parent so attribute-style lookups cascade.
+    if "numpy._core" not in sys.modules:
+        sys.modules["numpy._core"] = _core_1x
+
+    # 2) Explicitly alias every submodule. Some pickles reference the
+    #    full dotted path, which Python won't auto-resolve from the
+    #    parent alias alone.
+    try:
+        _path = getattr(_core_1x, "__path__", None)
+        if _path:
+            for mod_info in pkgutil.iter_modules(_path):
+                name = mod_info.name
+                full_old = "numpy.core." + name
+                full_new = "numpy._core." + name
+                try:
+                    sub = importlib.import_module(full_old)
+                except Exception:
+                    continue
+                if full_new not in sys.modules:
+                    sys.modules[full_new] = sub
+    except Exception:
+        pass
+
+
+try:
+    _register_numpy_core_aliases()
+except Exception:
+    # Never let the shim itself break module import.
+    pass
+
+
 import pandas as pd
 
 
