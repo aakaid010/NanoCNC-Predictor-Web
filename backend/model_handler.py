@@ -179,30 +179,105 @@ def _register_bit_generator_state_shim() -> None:
     """Strip numpy 2.x-only state keys before numpy 1.26 validates them.
 
     numpy 2.x added a ``bit_generator_state`` wrapper key to BitGenerator
-    state dicts. numpy 1.26's ``MT19937.state.__set__`` validator rejects
-    any dict containing this key with::
+    state dicts (and on the BitGenerator's outer pickle, an extra
+    ``bit_generator`` class key). numpy 1.26's ``MT19937.state.__set__``
+    validator rejects any dict that isn't shaped like the legacy
+    ``{'bit_generator': 'MT19937', 'state': {'key': ..., 'pos': ...}}``
+    form with::
 
         ValueError: state is not a legacy MT19937 state
 
-    The legacy-compatible payload (``'state'``, ``'buffer'``, etc.) is
-    still present in the dict; we just need to drop the wrapper key
-    before the validator runs. We intercept at
-    ``BitGenerator.__setstate__`` so the original validator sees only
-    the fields it knows how to consume.
+    The legacy-compatible payload is still present in the dict; we just
+    need to unwrap the 2.x wrapper before the Cython descriptor
+    validator runs. Patching ``BitGenerator.__setstate__`` from Python
+    is bypassed by the Cython class's own ``__setstate__`` (which
+    writes ``self.state = ...`` directly), so we have to wrap the
+    ``state`` descriptor's ``__set__`` on the ``MT19937`` class.
     """
     try:
-        from numpy.random.bit_generator import BitGenerator
-        _orig_setstate = BitGenerator.__setstate__
+        from numpy.random._mt19937 import MT19937
     except Exception:
         return
 
-    def _patched_setstate(self, state):
-        if isinstance(state, dict) and "bit_generator_state" in state:
-            state = {k: v for k, v in state.items() if k != "bit_generator_state"}
-        return _orig_setstate(self, state)
+    _orig_state = MT19937.state
+
+    # ``state`` is a Cython descriptor (cdef property). Get the Python-
+    # level setter so we can wrap it; if the descriptor has no Python
+    # setter, fall back to wrapping the underlying ``__setstate__`` on
+    # the class.
+    _state_setter = getattr(_orig_state, "fset", None)
+    if _state_setter is None:
+        # Cython-only property: wrap __setstate__ at the class level.
+        _orig_setstate = getattr(MT19937, "__setstate__", None)
+        if _orig_setstate is None:
+            return
+
+        def _coerce_state(state):
+            """Strip numpy 2.x wrappers; return legacy-shaped state dict."""
+            if not isinstance(state, dict):
+                return state
+            # 2.x outer: {'bit_generator': <class '...MT19937'>,
+            #             'bit_generator_state': {...},
+            #             'state': {'key': ..., 'pos': ...}}
+            if "bit_generator_state" in state and "state" in state:
+                state = {
+                    "bit_generator": "MT19937",
+                    "state": state["state"],
+                }
+            elif (
+                "bit_generator" in state
+                and isinstance(state["bit_generator"], type)
+            ):
+                state = {
+                    "bit_generator": "MT19937",
+                    "state": state.get("state", state),
+                }
+            elif "state" not in state and "bit_generator_state" in state:
+                state = {
+                    "bit_generator": "MT19937",
+                    "state": state["bit_generator_state"],
+                }
+            # Also handle the legacy tuple form (name, key, pos)
+            # transparently — the 1.26 setter does this too but the
+            # Cython version path may bypass it.
+            return state
+
+        def _patched_setstate(self, state):
+            return _orig_setstate(self, _coerce_state(state))
+
+        try:
+            MT19937.__setstate__ = _patched_setstate
+        except Exception:
+            pass
+        return
+
+    def _coerce_state_dict(value):
+        if not isinstance(value, dict):
+            return value
+        # Strip the 2.x class-object key; promote class name to string.
+        if "bit_generator" in value and isinstance(value["bit_generator"], type):
+            value = {**value, "bit_generator": value["bit_generator"].__name__}
+        # Unwrap 2.x bit_generator_state if present.
+        if "bit_generator_state" in value and "state" in value:
+            value = {**value}
+            value.pop("bit_generator_state", None)
+        elif "bit_generator_state" in value and "state" not in value:
+            value = {
+                "bit_generator": value.get("bit_generator", "MT19937"),
+                "state": value["bit_generator_state"],
+            }
+        # Ensure class-name string matches what 1.26 validator expects.
+        if value.get("bit_generator") != "MT19937":
+            value = {**value, "bit_generator": "MT19937"}
+        return value
+
+    def _patched_state_setter(self, value):
+        return _state_setter(self, _coerce_state_dict(value))
 
     try:
-        BitGenerator.__setstate__ = _patched_setstate
+        # Rebind the property descriptor on the class with a wrapper.
+        new_prop = property(_orig_state.fget, _patched_state_setter, _orig_state.fdel)
+        MT19937.state = new_prop
     except Exception:
         pass
 
