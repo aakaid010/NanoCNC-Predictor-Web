@@ -175,111 +175,110 @@ except Exception:
     pass
 
 
-def _register_bit_generator_state_shim() -> None:
-    """Strip numpy 2.x-only state keys before numpy 1.26 validates them.
+def _coerce_mt19937_state(value):
+    """Best-effort: coerce any incoming state into 1.26 legacy shape.
 
-    numpy 2.x added a ``bit_generator_state`` wrapper key to BitGenerator
-    state dicts (and on the BitGenerator's outer pickle, an extra
-    ``bit_generator`` class key). numpy 1.26's ``MT19937.state.__set__``
-    validator rejects any dict that isn't shaped like the legacy
+    1.26's ``MT19937.state`` validator requires the dict to be either
     ``{'bit_generator': 'MT19937', 'state': {'key': ..., 'pos': ...}}``
-    form with::
+    or a 3-/5-tuple. numpy 2.x pickles a richer dict with one of
+    these shapes:
+      (A) has both ``bit_generator_state`` and legacy ``state``
+      (B) ``bit_generator`` is a *class* object (not the string) and
+          the legacy ``state`` lives under ``bit_generator_state``
+      (C) only ``bit_generator_state`` is present
+    We unwrap all of them to legacy shape.
+    """
+    if isinstance(value, tuple) and len(value) in (3, 5):
+        return value
+    if not isinstance(value, dict):
+        return value
+    # Already legacy?
+    if (
+        value.get("bit_generator") == "MT19937"
+        and "state" in value
+        and isinstance(value["state"], dict)
+        and "key" in value["state"]
+        and "pos" in value["state"]
+    ):
+        return value
+    # 2.x shape A: outer dict contains both 2.x wrapper and legacy state
+    if "bit_generator_state" in value and isinstance(value["state"], dict):
+        return {
+            "bit_generator": "MT19937",
+            "state": value["state"],
+        }
+    # 2.x shape B: outer dict has class-object 'bit_generator'
+    if "bit_generator" in value and isinstance(value["bit_generator"], type):
+        inner = value.get("bit_generator_state") or value.get("state")
+        if isinstance(inner, dict):
+            return {
+                "bit_generator": "MT19937",
+                "state": inner,
+            }
+    # 2.x shape C: only bit_generator_state present
+    if "bit_generator_state" in value and isinstance(value["bit_generator_state"], dict):
+        return {
+            "bit_generator": "MT19937",
+            "state": value["bit_generator_state"],
+        }
+    return value
 
-        ValueError: state is not a legacy MT19937 state
 
-    The legacy-compatible payload is still present in the dict; we just
-    need to unwrap the 2.x wrapper before the Cython descriptor
-    validator runs. Patching ``BitGenerator.__setstate__`` from Python
-    is bypassed by the Cython class's own ``__setstate__`` (which
-    writes ``self.state = ...`` directly), so we have to wrap the
-    ``state`` descriptor's ``__set__`` on the ``MT19937`` class.
+def _register_bit_generator_state_shim() -> None:
+    """Patch ``joblib.numpy_pickle.NumpyUnpickler.load_build`` so that
+    every ``__setstate__`` payload destined for a ``BitGenerator`` is
+    massaged into the legacy 1.26 shape BEFORE the Cython validator
+    sees it.
+
+    Why this hook works
+    -------------------
+    * ``BitGenerator.__setstate__`` in 1.26 is a plain Python method
+      ``def __setstate__(self, state): self.state = state`` — nothing
+      to override there usefully.
+    * ``MT19937.state`` is a Cython cdef property descriptor; Python
+      ``property`` assignment cannot shadow it.
+    * But pickle's BUILD opcode eventually calls
+      ``obj.__setstate__(state)`` via the *unpickler*. By overriding
+      ``NumpyUnpickler.load_build`` (the Python-level BUILD handler),
+      we pop the state dict, coerce it, push it back, and delegate to
+      the original. The Cython ``MT19937.state.__set__`` then sees
+      the legacy shape and accepts it.
     """
     try:
-        from numpy.random._mt19937 import MT19937
+        from joblib.numpy_pickle import NumpyUnpickler
+        from numpy.random.bit_generator import BitGenerator
     except Exception:
         return
 
-    _orig_state = MT19937.state
+    if getattr(NumpyUnpickler, "_puku_coerce_load_build", False):
+        return
 
-    # ``state`` is a Cython descriptor (cdef property). Get the Python-
-    # level setter so we can wrap it; if the descriptor has no Python
-    # setter, fall back to wrapping the underlying ``__setstate__`` on
-    # the class.
-    _state_setter = getattr(_orig_state, "fset", None)
-    if _state_setter is None:
-        # Cython-only property: wrap __setstate__ at the class level.
-        _orig_setstate = getattr(MT19937, "__setstate__", None)
-        if _orig_setstate is None:
-            return
+    _orig_load_build = NumpyUnpickler.load_build
 
-        def _coerce_state(state):
-            """Strip numpy 2.x wrappers; return legacy-shaped state dict."""
-            if not isinstance(state, dict):
-                return state
-            # 2.x outer: {'bit_generator': <class '...MT19937'>,
-            #             'bit_generator_state': {...},
-            #             'state': {'key': ..., 'pos': ...}}
-            if "bit_generator_state" in state and "state" in state:
-                state = {
-                    "bit_generator": "MT19937",
-                    "state": state["state"],
-                }
-            elif (
-                "bit_generator" in state
-                and isinstance(state["bit_generator"], type)
-            ):
-                state = {
-                    "bit_generator": "MT19937",
-                    "state": state.get("state", state),
-                }
-            elif "state" not in state and "bit_generator_state" in state:
-                state = {
-                    "bit_generator": "MT19937",
-                    "state": state["bit_generator_state"],
-                }
-            # Also handle the legacy tuple form (name, key, pos)
-            # transparently — the 1.26 setter does this too but the
-            # Cython version path may bypass it.
-            return state
-
-        def _patched_setstate(self, state):
-            return _orig_setstate(self, _coerce_state(state))
-
+    def _patched_load_build(self):
         try:
-            MT19937.__setstate__ = _patched_setstate
+            state = self.stack.pop()
+        except IndexError:
+            return _orig_load_build(self)
+        try:
+            obj = self.stack[-1]
+            if isinstance(obj, BitGenerator):
+                try:
+                    state = _coerce_mt19937_state(state)
+                except Exception:
+                    # If coercion fails for any reason, leave the
+                    # state as-is and let the original handler run.
+                    pass
         except Exception:
             pass
-        return
-
-    def _coerce_state_dict(value):
-        if not isinstance(value, dict):
-            return value
-        # Strip the 2.x class-object key; promote class name to string.
-        if "bit_generator" in value and isinstance(value["bit_generator"], type):
-            value = {**value, "bit_generator": value["bit_generator"].__name__}
-        # Unwrap 2.x bit_generator_state if present.
-        if "bit_generator_state" in value and "state" in value:
-            value = {**value}
-            value.pop("bit_generator_state", None)
-        elif "bit_generator_state" in value and "state" not in value:
-            value = {
-                "bit_generator": value.get("bit_generator", "MT19937"),
-                "state": value["bit_generator_state"],
-            }
-        # Ensure class-name string matches what 1.26 validator expects.
-        if value.get("bit_generator") != "MT19937":
-            value = {**value, "bit_generator": "MT19937"}
-        return value
-
-    def _patched_state_setter(self, value):
-        return _state_setter(self, _coerce_state_dict(value))
+        self.stack.append(state)
+        return _orig_load_build(self)
 
     try:
-        # Rebind the property descriptor on the class with a wrapper.
-        new_prop = property(_orig_state.fget, _patched_state_setter, _orig_state.fdel)
-        MT19937.state = new_prop
+        NumpyUnpickler.load_build = _patched_load_build
+        NumpyUnpickler._puku_coerce_load_build = True
     except Exception:
-        pass
+        return
 
 
 try:

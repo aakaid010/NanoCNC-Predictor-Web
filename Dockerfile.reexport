@@ -1,0 +1,45 @@
+# One-shot re-export of nanocnc_model_bundle.pkl against the exact numpy
+# version Render uses (1.26.4). Build with:
+#
+#   docker build -f Dockerfile.reexport -t nanocnc-reexport .
+#   docker create --name reexport nanocnc-reexport
+#   docker cp reexport:/work/out/nanocnc_model_bundle.pkl backend/models/
+#   docker rm reexport
+#
+# The re-exported bundle uses numpy 1.26.4's native pickle format, so Render
+# loads it directly with no shim or patch in model_handler.py.
+FROM python:3.11.9-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1
+
+WORKDIR /work
+
+# Match backend/requirements.txt exactly so the pickle format is byte-for-byte
+# what Render will produce.
+COPY backend/requirements.txt /work/requirements.txt
+RUN pip install --upgrade pip \
+    && pip install -r /work/requirements.txt
+
+# Verify versions before touching anything.
+RUN python -c "import numpy, sklearn, joblib, pandas; \
+    print('numpy', numpy.__version__); \
+    print('sklearn', sklearn.__version__); \
+    print('joblib', joblib.__version__); \
+    print('pandas', pandas.__version__)"
+
+# Bundle in, bundle out.
+COPY backend/scripts/reexport_bundle.py /work/reexport_bundle.py
+COPY backend/models/nanocnc_model_bundle.pkl /work/in/nanocnc_model_bundle.pkl
+RUN mkdir -p /work/out
+
+# Re-export. The script accepts the bundle path as argv[1] or via $BUNDLE_PATH
+# so it works regardless of where this Dockerfile places the input.
+ENV BUNDLE_PATH=/work/in/nanocnc_model_bundle.pkl
+RUN python /work/reexport_bundle.py \
+    && cp /work/in/nanocnc_model_bundle.pkl /work/out/nanocnc_model_bundle.pkl \
+    && cp /work/in/nanocnc_model_bundle.pkl.pre-reexport.bak.pkl /work/out/nanocnc_model_bundle.pre-reexport.bak.pkl \
+    && ls -la /work/out/
+
+CMD ["bash"]
