@@ -175,6 +175,45 @@ except Exception:
     pass
 
 
+def _register_bit_generator_state_shim() -> None:
+    """Strip numpy 2.x-only state keys before numpy 1.26 validates them.
+
+    numpy 2.x added a ``bit_generator_state`` wrapper key to BitGenerator
+    state dicts. numpy 1.26's ``MT19937.state.__set__`` validator rejects
+    any dict containing this key with::
+
+        ValueError: state is not a legacy MT19937 state
+
+    The legacy-compatible payload (``'state'``, ``'buffer'``, etc.) is
+    still present in the dict; we just need to drop the wrapper key
+    before the validator runs. We intercept at
+    ``BitGenerator.__setstate__`` so the original validator sees only
+    the fields it knows how to consume.
+    """
+    try:
+        from numpy.random.bit_generator import BitGenerator
+        _orig_setstate = BitGenerator.__setstate__
+    except Exception:
+        return
+
+    def _patched_setstate(self, state):
+        if isinstance(state, dict) and "bit_generator_state" in state:
+            state = {k: v for k, v in state.items() if k != "bit_generator_state"}
+        return _orig_setstate(self, state)
+
+    try:
+        BitGenerator.__setstate__ = _patched_setstate
+    except Exception:
+        pass
+
+
+try:
+    _register_bit_generator_state_shim()
+except Exception:
+    # Never let the shim itself break module import.
+    pass
+
+
 import pandas as pd
 
 
