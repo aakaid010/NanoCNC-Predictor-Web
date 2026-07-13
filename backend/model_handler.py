@@ -99,6 +99,26 @@ def _register_mt19937_aliases() -> None:
     except Exception:
         pass
 
+    # Bundles pickled under numpy 2.x reference the MT19937 class object
+    # directly (e.g. ``<class 'numpy.random._mt19937.MT19937'>``). numpy
+    # 1.26.4's ``__bit_generator_ctor`` only accepts a *string* module
+    # name like ``'MT19937'``. Patch it to also accept the class.
+    try:
+        import numpy.random._pickle as _np_pickle_mod
+
+        _orig_bgc = _np_pickle_mod.__bit_generator_ctor
+
+        def _patched_bgc(bit_generator_name):
+            if not isinstance(bit_generator_name, str):
+                # numpy 2.x pickled the class object directly.
+                name = getattr(bit_generator_name, "__name__", None) or type(bit_generator_name).__name__
+                return _orig_bgc(name)
+            return _orig_bgc(bit_generator_name)
+
+        _np_pickle_mod.__bit_generator_ctor = _patched_bgc
+    except Exception:
+        pass
+
 
 try:
     _register_mt19937_aliases()
