@@ -43,9 +43,13 @@ git add -A && git commit -m "Ready for Render deploy" && git push origin main
 Render will:
 
 - Set Python 3.11.9.
-- Run `pip install -r requirements.txt`.
+- `cd backend`, then `pip install -r requirements.txt`.
 - Run `python scripts/check_bundle.py` (just verifies the bundle loads — harmless if it fails; the service still starts in Demo Mode).
-- Start `gunicorn app:app --bind 0.0.0.0:$PORT --workers 1 --timeout 120`.
+- Start `gunicorn app:app --bind 0.0.0.0:$PORT --workers 1 --timeout 120` (from inside `backend/`).
+
+> **Why no `rootDirectory`?** Some Blueprint validators reject `rootDirectory:
+> backend` when `render.yaml` itself lives at the repo root. We `cd backend` in
+> the build/start commands instead — same result, no validator friction.
 
 First build takes ~3–5 min because of scikit-learn. After that it's fast.
 

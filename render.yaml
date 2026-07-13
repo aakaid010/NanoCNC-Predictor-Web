@@ -3,11 +3,11 @@ services:
     name: nanocnc-predictor
     env: python
     plan: free
-    rootDirectory: backend
-    # `rootDirectory` already places the build cwd inside `backend/`,
-    # so the script can resolve the bundle via `__file__` directly.
-    buildCommand: "pip install --upgrade pip && pip install -r requirements.txt && python scripts/check_bundle.py"
-    startCommand: "gunicorn app:app --bind 0.0.0.0:$PORT --workers 1 --timeout 120"
+    # Do NOT set rootDirectory: render.yaml lives at the repo root, and
+    # some Blueprint validators reject rootDirectory for repos where
+    # the YAML sits at the top level. We cd into backend/ ourselves.
+    buildCommand: "cd backend && pip install --upgrade pip && pip install -r requirements.txt && python scripts/check_bundle.py"
+    startCommand: "cd backend && gunicorn app:app --bind 0.0.0.0:$PORT --workers 1 --timeout 120"
     envVars:
       - key: PYTHON_VERSION
         value: "3.11.9"
